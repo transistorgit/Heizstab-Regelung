@@ -23,8 +23,6 @@ void setup() {
   pinMode(HEARTBEAT, OUTPUT);
 
   Serial.begin(BAUDRATE);
-  Serial.println("Init");
-  delay(1000);
 
   if(!ModbusRTUServer.begin(STATION_ID, BAUDRATE)){
     Serial.println("Failed to start Modbus RTU Server!");
