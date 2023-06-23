@@ -63,12 +63,12 @@ void setup() {
 }
 
 void loop() {
-  static auto heartBeat = 0;
+  static auto heartbeat = 0;
   static auto last_client_heartbeat = -1;
+  static auto last_millis = millis();
 
   ModbusRTUServer.poll();
-  ModbusRTUServer.inputRegisterWrite(INPREG_HEARTBEAT, heartBeat); //testanfrage: 0x21 0x04 0x00 0x01 0x00 0x01 0x36 0xaa
-
+  
   auto temperature = read_temperature();
   ModbusRTUServer.inputRegisterWrite(INPREG_TEMPERATURE, temperature);
 
@@ -76,28 +76,32 @@ void loop() {
   //we sync the heartbeats and can detect a timeout by comparing the incoming heartbeat with our own
   if (last_client_heartbeat != ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT)){
     last_client_heartbeat = ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT);
-    heartBeat = last_client_heartbeat;
+    heartbeat = last_client_heartbeat;
     set_error_led(false);	
+
+    //set power according to client request
+    auto power = ModbusRTUServer.coilRead(COIL_500W) + (ModbusRTUServer.coilRead(COIL_1000W) << 1) + (ModbusRTUServer.coilRead(COIL_2000W) << 2);
+    set_power(power);
   }
   else{
     //no update from client
-    if(heartBeat - last_client_heartbeat > TIMEOUT_SECONDS){
+    if(heartbeat - last_client_heartbeat > TIMEOUT_SECONDS){
       set_power(0);
       set_error_led(true);
     }
   }
 
-  //set power according to client request
-  auto power = ModbusRTUServer.coilRead(COIL_500W) + (ModbusRTUServer.coilRead(COIL_1000W) << 1) + (ModbusRTUServer.coilRead(COIL_2000W) << 2);
-  set_power(power);
-
   auto power_feedback = (digitalRead(SSR_500W)*500) + (digitalRead(SSR_1000W)*1000) + (digitalRead(SSR_2000W)*2000);
   ModbusRTUServer.inputRegisterWrite(INPREG_POWER, power_feedback);
 
-  delay(1000);
-  if(heartBeat++ > 10000){ //we don't want to overflow, in case we get no update from client
-    heartBeat = 0;
-    last_client_heartbeat = ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT);
+  if(millis() - last_millis > 1000){
+    last_millis = millis();
+   
+    if(heartbeat++ > 1000){ //we don't want to overflow, in case we get no update from client
+      heartbeat = 0;
+      last_client_heartbeat = ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT);
+    }
+    ModbusRTUServer.inputRegisterWrite(INPREG_HEARTBEAT, heartbeat); //testanfrage: 0x21 0x04 0x00 0x01 0x00 0x01 0x36 0xaa
+    digitalWrite(HEARTBEAT, heartbeat % 2);
   }
-  digitalWrite(HEARTBEAT, heartBeat % 2);
 }
