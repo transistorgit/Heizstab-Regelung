@@ -75,7 +75,7 @@ void loop() {
   ModbusRTUServer.poll();
   
   auto temperature = read_temperature();
-  ModbusRTUServer.inputRegisterWrite(INPREG_TEMPERATURE, temperature);
+  ModbusRTUServer.inputRegisterWrite(INPREG_TEMPERATURE, temperature * 100);
 
   //if we got no update for a while, turn off everything
   //we sync the heartbeats and can detect a timeout by comparing the incoming heartbeat with our own
