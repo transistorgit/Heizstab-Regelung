@@ -14,6 +14,8 @@ const auto SSR_1000W { 5 };
 const auto SSR_2000W { 4 };
 const auto HEARTBEAT { 13 };
 const auto ERROR_LED { 9 };
+const auto ONE_WIRE_BUS{2};
+const auto SWITCH_OVERRIDE{A5};
 
 //modbus registers
 const auto COIL_500W { 0 };
@@ -23,6 +25,7 @@ const auto INPREG_TEMPERATURE { 0 };
 const auto INPREG_HEARTBEAT { 1 };  //outgoing heartbeat
 const auto INPREG_POWER { 2 };     //outgoing power feedback
 const auto INPREG_DEVICE_TYPE{3};  // outgoing device type, so that the client can detect the device type
+const auto INPREG_MODE{4};         // outgoing switch Auto/On
 const auto HOLDREG_HEARTBEAT { 0 }; //incoming heartbeat
 
 //limits
@@ -51,6 +54,9 @@ void setup() {
   pinMode(SSR_2000W, OUTPUT);
   pinMode(HEARTBEAT, OUTPUT);
   pinMode(ERROR_LED, OUTPUT);
+  // pinMode(ONE_WIRE_BUS, INPUT);
+  pinMode(SWITCH_OVERRIDE, INPUT_PULLUP);
+
   set_error_led(false);
   set_power(0);
 
@@ -75,26 +81,45 @@ void loop() {
   ModbusRTUServer.poll();
   
   auto temperature = read_temperature();
-  ModbusRTUServer.inputRegisterWrite(INPREG_TEMPERATURE, temperature);
+  ModbusRTUServer.inputRegisterWrite(INPREG_TEMPERATURE, temperature * 100);
 
-  //if we got no update for a while, turn off everything
-  //we sync the heartbeats and can detect a timeout by comparing the incoming heartbeat with our own
-  if (last_client_heartbeat != ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT)){
-    last_client_heartbeat = ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT);
-    heartbeat = last_client_heartbeat;
-    set_error_led(false);	
+  auto manualOverride = !digitalRead(SWITCH_OVERRIDE); // must be pulled low to activate override
+  ModbusRTUServer.inputRegisterWrite(INPREG_MODE, manualOverride);
 
-    //set power according to client request
-    auto power = ModbusRTUServer.coilRead(COIL_500W) + (ModbusRTUServer.coilRead(COIL_1000W) << 1) + (ModbusRTUServer.coilRead(COIL_2000W) << 2);
-    set_power(power);
+  // calculate power command in each loop
+  int powerCmd = 0;
+
+  if (manualOverride)
+  {
+    // manual on mode - all coils on
+    set_error_led(heartbeat % 2);
+    powerCmd = (1 << COIL_500W) + (1 << COIL_1000W) + (1 << COIL_2000W);
   }
-  else{
-    //no update from client
-    if(heartbeat - last_client_heartbeat > TIMEOUT_SECONDS){
-      set_power(0);
-      set_error_led(true);
+  else
+  { // auto mode
+
+    set_error_led(false);
+    // if we got no update for a while, turn off everything
+    // we sync the heartbeats and can detect a timeout by comparing the incoming heartbeat with our own
+    if (last_client_heartbeat != ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT))
+    {
+      last_client_heartbeat = ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT);
+      heartbeat = last_client_heartbeat;
+
+      // set power according to client request
+      powerCmd = ModbusRTUServer.coilRead(COIL_500W) + (ModbusRTUServer.coilRead(COIL_1000W) << 1) + (ModbusRTUServer.coilRead(COIL_2000W) << 2);
+    }
+    else
+    {
+      // no update from client
+      if (heartbeat - last_client_heartbeat > TIMEOUT_SECONDS)
+      {
+        powerCmd = 0;
+        set_error_led(true);
+      }
     }
   }
+  set_power(powerCmd);
 
   auto power_feedback = (digitalRead(SSR_500W)*500) + (digitalRead(SSR_1000W)*1000) + (digitalRead(SSR_2000W)*2000);
   ModbusRTUServer.inputRegisterWrite(INPREG_POWER, power_feedback);

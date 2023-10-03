@@ -24,8 +24,8 @@ def loop():
             f"Heartbeat: {instrument.read_register(1, 0, 4)}", end=" "
         )  # read heartbeat counter
         print(f"Power: {instrument.read_register(2, 0, 4)}", end=" ")  # read power
-        print(f"Temp: {instrument.read_register(0, 0, 4)}")  # read temperature
-        print(f"Type: {instrument.read_register(3, 0, 4)}")
+        print(f"Temp: {instrument.read_register(0, 2, 4):.2f}", end=" ")  # read temperature
+        print(f"Type: 0x{instrument.read_register(3, 0, 4):X}")
 
 
 def main():

@@ -5,5 +5,23 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": [
+			{
+				"name": "PlatformIO Debugger",
+				"request": "launch",
+				"type": "platformio-debug",
+				"executable": ".pio/build/myenv/firmware.elf",
+				"toolchainBinDir": "/usr/local/bin"
+			},
+			{
+				"name": "PlatformIO Debugger",
+				"request": "launch",
+				"type": "platformio-debug",
+				"toolchainBinDir": "/usr/local/bin"
+			}
+		]
+	}
 }
