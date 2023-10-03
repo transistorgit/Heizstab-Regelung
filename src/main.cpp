@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <ArduinoModbus.h>
 
+// device type
+const auto DEVICE_TYPE{0x3286};
+
 //comm settings
 const auto BAUDRATE { 19200 };
 const auto STATION_ID { 33 };
@@ -19,6 +22,7 @@ const auto COIL_2000W { 2 };
 const auto INPREG_TEMPERATURE { 0 };
 const auto INPREG_HEARTBEAT { 1 };  //outgoing heartbeat
 const auto INPREG_POWER { 2 };     //outgoing power feedback
+const auto INPREG_DEVICE_TYPE{3};  // outgoing device type, so that the client can detect the device type
 const auto HOLDREG_HEARTBEAT { 0 }; //incoming heartbeat
 
 //limits
@@ -27,7 +31,7 @@ const auto TIMEOUT_SECONDS {300};
 
 float read_temperature(){
   //TODO: read temperature from 1w thermometer
-  return 42.0;
+  return 42.42f;
 }
 
 void set_power(uint8_t power){
@@ -58,8 +62,9 @@ void setup() {
   }
 
   ModbusRTUServer.configureCoils(0, 3);
-  ModbusRTUServer.configureInputRegisters(0, 3);
+  ModbusRTUServer.configureInputRegisters(0, 4);
   ModbusRTUServer.configureHoldingRegisters(0, 1);
+  ModbusRTUServer.inputRegisterWrite(INPREG_DEVICE_TYPE, DEVICE_TYPE);
 }
 
 void loop() {
