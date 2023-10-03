@@ -10,9 +10,10 @@ def loop():
 
     while True:
         instrument.write_register(0, heartbeat)  # write heartbeat counter
-        instrument.write_bit(0, power)
-        instrument.write_bit(1, power)
-        instrument.write_bit(2, power)
+        # instrument.write_bit(0, power)
+        # instrument.write_bit(1, power)
+        # instrument.write_bit(2, power)
+        instrument.write_bits(0, [0, 0, power])
 
         sleep(1)
         heartbeat += 1
@@ -22,7 +23,8 @@ def loop():
         print(
             f"Heartbeat: {instrument.read_register(1, 0, 4)}", end=" "
         )  # read heartbeat counter
-        print(f"Power: {instrument.read_register(2, 0, 4)}")  # read power
+        print(f"Power: {instrument.read_register(2, 0, 4)}", end=" ")  # read power
+        print(f"Temp: {instrument.read_register(0, 0, 4)}")  # read temperature
 
 
 def main():
