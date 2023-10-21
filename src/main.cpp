@@ -5,7 +5,7 @@
 const auto DEVICE_TYPE{0x3286};
 
 //comm settings
-const auto BAUDRATE { 19200 };
+const auto BAUDRATE{9600};
 const auto STATION_ID { 33 };
 
 //pins
@@ -26,11 +26,14 @@ const auto INPREG_HEARTBEAT { 1 };  //outgoing heartbeat
 const auto INPREG_POWER { 2 };     //outgoing power feedback
 const auto INPREG_DEVICE_TYPE{3};  // outgoing device type, so that the client can detect the device type
 const auto INPREG_MODE{4};         // outgoing switch Auto/On
-const auto HOLDREG_HEARTBEAT { 0 }; //incoming heartbeat
+const auto INPREG_DEBUGRECVEDHEARTBEAT{5};
+const auto INPREG_DEBUGLASTHEARTBEAT{6};
+
+const auto HOLDREG_HEARTBEAT{0}; // incoming heartbeat
 
 //limits
 const auto MAX_TEMP {70.0};
-const auto TIMEOUT_SECONDS {300};
+const auto TIMEOUT_SECONDS{300ul};
 
 float read_temperature(){
   //TODO: read temperature from 1w thermometer
@@ -61,33 +64,33 @@ void setup() {
   set_power(0);
 
   Serial.begin(BAUDRATE);
+  while (!Serial)
+    ;
 
   if(!ModbusRTUServer.begin(STATION_ID, BAUDRATE)){
-    Serial.println("Failed to start Modbus RTU Server!");
+    // Serial.println("Failed to start Modbus RTU Server!");
     while(1);
   }
 
   ModbusRTUServer.configureCoils(0, 3);
-  ModbusRTUServer.configureInputRegisters(0, 4);
+  ModbusRTUServer.configureInputRegisters(0, 7);
   ModbusRTUServer.configureHoldingRegisters(0, 1);
   ModbusRTUServer.inputRegisterWrite(INPREG_DEVICE_TYPE, DEVICE_TYPE);
 }
 
 void loop() {
   static auto heartbeat = 0;
+  static int powerCmd = 0;
   static auto last_client_heartbeat = -1;
   static auto last_millis = millis();
+  static auto last_update = millis();
 
   ModbusRTUServer.poll();
-  
   auto temperature = read_temperature();
   ModbusRTUServer.inputRegisterWrite(INPREG_TEMPERATURE, temperature * 100);
 
   auto manualOverride = !digitalRead(SWITCH_OVERRIDE); // must be pulled low to activate override
   ModbusRTUServer.inputRegisterWrite(INPREG_MODE, manualOverride);
-
-  // calculate power command in each loop
-  int powerCmd = 0;
 
   if (manualOverride)
   {
@@ -99,20 +102,24 @@ void loop() {
   { // auto mode
 
     set_error_led(false);
-    // if we got no update for a while, turn off everything
-    // we sync the heartbeats and can detect a timeout by comparing the incoming heartbeat with our own
-    if (last_client_heartbeat != ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT))
-    {
-      last_client_heartbeat = ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT);
-      heartbeat = last_client_heartbeat;
+    // check if the client sends valid updates (if we got no update for a while, turn off everything)
 
-      // set power according to client request
+    auto receivedHeartbeat = ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT);
+    ModbusRTUServer.inputRegisterWrite(INPREG_DEBUGRECVEDHEARTBEAT, receivedHeartbeat);
+    ModbusRTUServer.inputRegisterWrite(INPREG_DEBUGLASTHEARTBEAT, last_update & 0xffff);
+    if (last_client_heartbeat != receivedHeartbeat)
+    {
+      // client sends an updated heartbeat - so everything is fine
+      last_client_heartbeat = receivedHeartbeat;
+      last_update = millis();
+
+      // set power according to current client's request
       powerCmd = ModbusRTUServer.coilRead(COIL_500W) + (ModbusRTUServer.coilRead(COIL_1000W) << 1) + (ModbusRTUServer.coilRead(COIL_2000W) << 2);
     }
     else
     {
-      // no update from client
-      if (heartbeat - last_client_heartbeat > TIMEOUT_SECONDS)
+      // no update from client, shut off
+      if (millis() - last_update > TIMEOUT_SECONDS * 1000ul)
       {
         powerCmd = 0;
         set_error_led(true);
@@ -121,17 +128,19 @@ void loop() {
   }
   set_power(powerCmd);
 
-  auto power_feedback = (digitalRead(SSR_500W)*500) + (digitalRead(SSR_1000W)*1000) + (digitalRead(SSR_2000W)*2000);
+  auto power_feedback = (digitalRead(SSR_500W) * 500) + (digitalRead(SSR_1000W) * 1000) + (digitalRead(SSR_2000W) * 2000);
   ModbusRTUServer.inputRegisterWrite(INPREG_POWER, power_feedback);
 
-  if(millis() - last_millis > 1000){
+  // heartbeat housekeeping
+  if (millis() - last_millis > 1000ul)
+  {
     last_millis = millis();
-   
-    if(heartbeat++ > 1000){ //we don't want to overflow, in case we get no update from client
+
+    if (heartbeat++ > 1000)
+    {
       heartbeat = 0;
-      last_client_heartbeat = ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT);
     }
-    ModbusRTUServer.inputRegisterWrite(INPREG_HEARTBEAT, heartbeat); //testanfrage: 0x21 0x04 0x00 0x01 0x00 0x01 0x36 0xaa
+    ModbusRTUServer.inputRegisterWrite(INPREG_HEARTBEAT, heartbeat); // testanfrage: 0x21 0x04 0x00 0x01 0x00 0x01 0x36 0xaa
     digitalWrite(HEARTBEAT, heartbeat % 2);
   }
 }
