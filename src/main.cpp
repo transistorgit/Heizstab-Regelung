@@ -165,7 +165,7 @@ void loop()
   ModbusRTUServer.poll();
 
   auto manualOverride = !digitalRead(SWITCH_OVERRIDE); // must be pulled low to activate override
-  ModbusRTUServer.inputRegisterWrite(INPREG_MODE, manualOverride);
+  ModbusRTUServer.inputRegisterWrite(INPREG_MODE, manualOverride); // 0 AUTO, 1 FORCE ON
 
   if (manualOverride)
   {
