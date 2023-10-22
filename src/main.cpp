@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ArduinoModbus.h>
+#include <OneWire.h>
 
 // device type, arbitrary number
 const auto DEVICE_TYPE{0xE5E1};
@@ -28,14 +29,12 @@ const auto INPREG_DEVICE_TYPE{3}; // outgoing device type, so that the client ca
 const auto INPREG_MODE{4};        // outgoing switch Auto/On
 const auto HOLDREG_HEARTBEAT{0};  // incoming heartbeat
 
+OneWire ds(ONE_WIRE_BUS);
+byte data[9];
+
 //limits
 const auto MAX_TEMP{50.0};
 const auto TIMEOUT_SECONDS{300ul};
-
-float read_temperature(){
-  //TODO: read temperature from 1w thermometer
-  return 42.42f;
-}
 
 void set_power(uint8_t power){
   digitalWrite(SSR_500W, power & 0x01);
@@ -45,6 +44,82 @@ void set_power(uint8_t power){
 
 void set_error_led(bool on){
   digitalWrite(ERROR_LED, on);
+}
+
+// for testing or sensor checking
+void oneWireScan()
+{
+  byte i;
+  byte addr[8];
+  
+  if ( !ds.search(addr)) {
+    Serial.println("No more addresses.");
+    Serial.println();
+    ds.reset_search();
+    delay(250);
+    return;
+  }
+  
+  Serial.print("ROM =");
+  for( i = 0; i < 8; i++) {
+    Serial.write(' ');
+    Serial.print(addr[i], HEX);
+  }
+
+  if (OneWire::crc8(addr, 7) != addr[7]) {
+      Serial.println("CRC is not valid!");
+      return;
+  }
+  Serial.println();
+ 
+  // the first ROM byte indicates which chip
+  switch (addr[0]) {
+    case 0x10:
+      Serial.println("  Chip = DS18S20");  // or old DS1820
+      break;
+    case 0x28:
+      Serial.println("  Chip = DS18B20");
+      break;
+    case 0x22:
+      Serial.println("  Chip = DS1822");
+      break;
+    default:
+      Serial.println("Device is not a DS18x20 family device.");
+      return;
+  } 
+
+  ds.reset();
+  ds.select(addr);
+  ds.write(0x44,1);        // start conversion, with parasite power on at the end
+}
+
+void oneWireConvert()
+{
+  ds.reset();
+  ds.skip();
+  ds.write(0x44);
+}
+
+float oneWireRead()
+{
+  ds.reset();
+  ds.skip();
+  ds.write(0xBE);
+  ds.read_bytes(data, 9);
+  if (data[8] == ds.crc8(data, 8))
+  {
+    int16_t raw = (data[1] << 8) | data[0];
+    byte cfg = (data[4] & 0x60);
+    // at lower res, the low bits are undefined, so let's zero them
+    if (cfg == 0x00)
+      raw = raw & ~7; // 9 bit resolution, 93.75 ms
+    else if (cfg == 0x20)
+      raw = raw & ~3; // 10 bit res, 187.5 ms
+    else if (cfg == 0x40)
+      raw = raw & ~1;         // 11 bit res, 375 ms
+    return (float)raw / 16.0; // celsius
+  }
+  return 85.0;
 }
 
 void setup() {
@@ -64,7 +139,11 @@ void setup() {
   while (!Serial)
     ;
 
-  if(!ModbusRTUServer.begin(STATION_ID, BAUDRATE)){
+  //oneWireScan(); //test sensors
+  oneWireConvert();
+
+  if (!ModbusRTUServer.begin(STATION_ID, BAUDRATE))
+  {
     Serial.println("Failed to start Modbus RTU Server!");
     while(1);
   }
@@ -75,7 +154,8 @@ void setup() {
   ModbusRTUServer.inputRegisterWrite(INPREG_DEVICE_TYPE, DEVICE_TYPE);
 }
 
-void loop() {
+void loop()
+{
   static auto heartbeat = 0;
   static auto powerCmd = 0;
   static auto last_client_heartbeat = -1;
@@ -83,8 +163,6 @@ void loop() {
   static auto last_update = millis();
 
   ModbusRTUServer.poll();
-  auto temperature = read_temperature();
-  ModbusRTUServer.inputRegisterWrite(INPREG_TEMPERATURE, temperature * 100);
 
   auto manualOverride = !digitalRead(SWITCH_OVERRIDE); // must be pulled low to activate override
   ModbusRTUServer.inputRegisterWrite(INPREG_MODE, manualOverride);
@@ -97,10 +175,9 @@ void loop() {
   }
   else
   { // auto mode
-
     set_error_led(false);
-    // check if the client sends valid updates (if we got no update for a while, turn off everything)
 
+    // check if the client sends valid updates (if we got no update for a while, turn off everything)
     auto receivedHeartbeat = ModbusRTUServer.holdingRegisterRead(HOLDREG_HEARTBEAT);
     if (last_client_heartbeat != receivedHeartbeat)
     {
@@ -126,13 +203,18 @@ void loop() {
   auto power_feedback = (digitalRead(SSR_500W) * 500) + (digitalRead(SSR_1000W) * 1000) + (digitalRead(SSR_2000W) * 2000);
   ModbusRTUServer.inputRegisterWrite(INPREG_POWER, power_feedback);
 
-  // heartbeat housekeeping
+  // heartbeat housekeeping and one-per-second-activities
   if (millis() - last_millis > 1000ul)
   {
     last_millis = millis();
     heartbeat++;
 
-    ModbusRTUServer.inputRegisterWrite(INPREG_HEARTBEAT, heartbeat & 0xFFFF); // testanfrage: 0x21 0x04 0x00 0x01 0x00 0x01 0x36 0xaa
+    ModbusRTUServer.inputRegisterWrite(INPREG_HEARTBEAT, heartbeat & 0xFFFF); // test request: 0x21 0x04 0x00 0x01 0x00 0x01 0x36 0xaa
     digitalWrite(HEARTBEAT, heartbeat % 2);
+
+    auto temperature = oneWireRead();
+    // Serial.println(temperature);
+    ModbusRTUServer.inputRegisterWrite(INPREG_TEMPERATURE, temperature * 100);
+    oneWireConvert(); // sensor needs >750ms in background
   }
 }
