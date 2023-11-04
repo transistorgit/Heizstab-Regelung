@@ -213,7 +213,6 @@ void loop()
     digitalWrite(HEARTBEAT, heartbeat % 2);
 
     auto temperature = oneWireRead();
-    // Serial.println(temperature);
     ModbusRTUServer.inputRegisterWrite(INPREG_TEMPERATURE, temperature * 100);
     oneWireConvert(); // sensor needs >750ms in background
   }
